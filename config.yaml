@@ -1,0 +1,30 @@
+# ===== snack-check pipeline configuration =====
+# Every script reads its parameters from this file; nothing is hard-coded.
+
+data:
+  # Raw data source (Open Food Facts on Hugging Face, ODbL license)
+  hf_repo_id: "openfoodfacts/product-database"
+  hf_filename: "food.parquet"
+  sample_size: 100000          # number of rows to keep after cleaning
+  seed: 42                     # random seed for sampling, for reproducibility
+  local_dir: "data"            # local data folder (git-ignored)
+  clean_filename: "food_clean.parquet"
+  # Google Cloud Storage location
+  gcs_bucket: "snack-check-data-lexie"          # change to your actual bucket name
+  gcs_blob: "data/food_clean.parquet"
+
+target:
+  source_column: nova_group    # NOVA processing level 1-4
+  name: ultra_processed        # binary target: 1 = ultra-processed (NOVA 4)
+  positive_value: 4
+
+features:                      # per 100g; must match the API input fields
+  - energy_kcal
+  - fat
+  - saturated_fat
+  - carbohydrates
+  - sugars
+  - fiber
+  - proteins
+  - salt
+  - additives_n

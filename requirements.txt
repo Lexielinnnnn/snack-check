@@ -1,0 +1,7 @@
+# data ingestion
+duckdb
+pandas
+pyarrow
+pyyaml
+huggingface_hub
+google-cloud-storage
