@@ -5,3 +5,9 @@ pyarrow
 pyyaml
 huggingface_hub
 google-cloud-storage
+
+# training & experiment tracking
+scikit-learn
+mlflow
+matplotlib
+joblib

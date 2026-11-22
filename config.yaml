@@ -10,7 +10,7 @@ data:
   local_dir: "data"            # local data folder (git-ignored)
   clean_filename: "food_clean.parquet"
   # Google Cloud Storage location
-  gcs_bucket: "snack-check-data-lexie"          # change to your actual bucket name
+  gcs_bucket: "snack-check-data-lexie"
   gcs_blob: "data/food_clean.parquet"
 
 target:
@@ -28,3 +28,32 @@ features:                      # per 100g; must match the API input fields
   - proteins
   - salt
   - additives_n
+
+split:
+  test_size: 0.15
+  val_size: 0.15
+  random_state: 42
+
+model:
+  type: random_forest          # logistic_regression | random_forest
+  params:
+    logistic_regression:
+      C: 1.0
+      max_iter: 1000
+      class_weight: balanced
+    random_forest:
+      n_estimators: 200
+      max_depth: 12
+      min_samples_leaf: 5
+      class_weight: balanced
+      n_jobs: -1
+      random_state: 42
+
+mlflow:
+  tracking_uri: "sqlite:///mlflow.db"   # local MLflow backend (git-ignored)
+  experiment_name: "snack-check"
+
+output:
+  model_dir: "models"                   # local model folder (git-ignored)
+  model_filename: "model.joblib"
+  gcs_blob: "models/model.joblib"       # where the API loads the model from
