@@ -1,0 +1,14 @@
+# Upload list for `gcloud builds submit`. Without this file gcloud falls back to .gitignore,
+# which would exclude models/ and leave the model out of the image.
+.git
+.venv/
+__pycache__/
+data/
+*.parquet
+mlruns/
+mlflow.db
+.env
+*-key.json
+service-account*.json
+frontend/
+tests/
