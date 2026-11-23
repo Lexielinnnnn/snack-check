@@ -7,4 +7,8 @@ mlruns/
 explore.py
 explore_output.txt
 mlflow.db
-models/
+models/*
+!models/.gitkeep
+.pytest_cache/
+*-key.json
+service-account*.json
