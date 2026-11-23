@@ -7,7 +7,15 @@ huggingface_hub
 google-cloud-storage
 
 # training & experiment tracking
-scikit-learn
+scikit-learn==1.9.1   # must match the version the model was trained with (joblib pickle)
 mlflow
 matplotlib
 joblib
+
+# serving
+fastapi
+uvicorn[standard]
+
+# tests
+pytest
+httpx
