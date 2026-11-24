@@ -1,10 +1,12 @@
 # 🥨 Snack Check — Is this snack ultra-processed?
 
-**Live app:** <FRONTEND_URL> · **API:** <API_URL> ([interactive docs](<API_URL>/docs))
+**Live app:** https://snack-check.streamlit.app · **API:** https://snack-check-api-433582708621.us-central1.run.app ([interactive docs](https://snack-check-api-433582708621.us-central1.run.app/docs))
+
+> If the app shows a "sleeping" screen, click **Wake up** (~30 s). The first prediction after idle can take ~10 s while Cloud Run starts a container.
 
 A full-stack ML system that predicts whether a packaged food is **ultra-processed (NOVA group 4)** from
 the nine numbers on its nutrition label. Data from Open Food Facts → cleaned and stored in Google Cloud
-Storage → sklearn pipeline tracked with MLflow → FastAPI on Cloud Run → Streamlit app on Hugging Face Spaces.
+Storage → sklearn pipeline tracked with MLflow → FastAPI on Cloud Run → Streamlit app on Streamlit Community Cloud.
 
 <!-- ===== Sections owned by A: overview & goals, dataset (Open Food Facts, ODbL), model & evaluation,
      how to train, ethics & limitations ===== -->
@@ -21,7 +23,7 @@ HF food.parquet ──ingest.py──▶ GCS (food_clean.parquet)
                      GCS models/model.joblib
                                   │ baked into image
                                   ▼
-  Streamlit (HF Spaces) ──POST /predict──▶ FastAPI (Cloud Run)
+  Streamlit (Community Cloud) ──POST /predict──▶ FastAPI (Cloud Run)
 ```
 
 ## Cloud services used
@@ -32,7 +34,7 @@ HF food.parquet ──ingest.py──▶ GCS (food_clean.parquet)
 | Cloud Build | Builds the Docker image remotely |
 | Artifact Registry | Stores the Docker image |
 | Cloud Run | Hosts the public FastAPI `/predict` endpoint |
-| Hugging Face Spaces | Hosts the Streamlit front end |
+| Streamlit Community Cloud | Hosts the Streamlit front end |
 
 ## API
 
@@ -109,9 +111,25 @@ curl -X POST http://localhost:8080/predict -H "Content-Type: application/json" \
 
 ### API → Cloud Run
 
+**One-time project setup** (needs a project Owner). New GCP projects run Cloud Build as the Compute Engine
+default service account, which can't read the build source by default:
+
+```bash
+PROJECT=<PROJECT_ID>
+SA=<PROJECT_NUMBER>-compute@developer.gserviceaccount.com
+for ROLE in roles/cloudbuild.builds.builder roles/storage.objectViewer roles/artifactregistry.writer roles/logging.logWriter; do
+  gcloud projects add-iam-policy-binding $PROJECT --member="serviceAccount:$SA" --role="$ROLE" --condition=None
+done
+```
+
+The person deploying needs **Editor + Cloud Run Admin + Project IAM Admin**. Editor alone can deploy, but
+can't make the service public (`--allow-unauthenticated` silently fails and the URL returns 403).
+
+**Deploy:**
+
 ```bash
 gcloud auth login
-gcloud config set project <PROJECT_ID>
+gcloud config set project <PROJECT_ID>      # the ID (e.g. project-ca4d...), not the project number
 bash scripts/deploy_cloud_run.sh
 ```
 
@@ -120,20 +138,35 @@ current model from GCS into the build context, builds the image with Cloud Build
 with `--allow-unauthenticated`, and runs a smoke test against the public URL. Override settings inline,
 e.g. `REGION=us-east1 SERVICE=snack-check-api bash scripts/deploy_cloud_run.sh`.
 
-To ship a new model, retrain (`python src/train.py` uploads it to GCS) and rerun the deploy script; each
-image tag is the git commit, so every deployed revision maps to one model file.
+**Alternative without Cloud Build** (build locally, push, deploy). On Apple Silicon, `--platform linux/amd64`
+is required because Cloud Run only runs amd64 images:
 
-### Front end → Hugging Face Spaces
+```bash
+gcloud storage cp gs://snack-check-data-lexie/models/model.joblib models/model.joblib
+gcloud auth configure-docker us-central1-docker.pkg.dev
+IMAGE=us-central1-docker.pkg.dev/<PROJECT_ID>/snack-check/api:$(git rev-parse --short HEAD)
+docker buildx build --platform linux/amd64 -t $IMAGE --push .
+gcloud run deploy snack-check-api --image $IMAGE --region us-central1 --allow-unauthenticated --memory 1Gi --max-instances 2
+```
 
-1. Create a new Space (SDK: **Docker**, blank template).
-2. Copy the front-end files into the Space repo:
-   ```bash
-   git clone https://huggingface.co/spaces/<HF_USER>/snack-check space
-   cp frontend/app.py frontend/requirements.txt frontend/Dockerfile space/
-   cp frontend/SPACE_README.md space/README.md
-   cd space && git add . && git commit -m "Deploy Snack Check front end" && git push
+To ship a new model, retrain (`python src/train.py` uploads it to GCS) and redeploy; each image tag is the
+git commit, so every deployed revision maps to one model file.
+
+Live API: https://snack-check-api-433582708621.us-central1.run.app
+
+### Front end → Streamlit Community Cloud
+
+1. Sign in at [share.streamlit.io](https://share.streamlit.io) with a GitHub account that is an **admin** of
+   the repo (push access is not enough).
+2. **Create app → Deploy a public app from GitHub**, main file `frontend/app.py`, branch `main`.
+3. **Advanced settings:** Python 3.11; under **Secrets** add
+   ```toml
+   API_URL = "https://snack-check-api-433582708621.us-central1.run.app"
    ```
-3. In the Space **Settings → Variables and secrets**, add a variable `API_URL` = your Cloud Run URL.
+   Streamlit exposes top-level secrets as environment variables, which `app.py` reads.
+4. Deploy. Dependencies come from `frontend/requirements.txt` (next to `app.py`).
+
+Live app: https://snack-check.streamlit.app
 
 Run the front end locally against a local API:
 
