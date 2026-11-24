@@ -2,9 +2,14 @@
 # Build the image with Cloud Build, push it to Artifact Registry, deploy to Cloud Run (public).
 #
 # Prereqs (once): gcloud auth login && gcloud config set project <PROJECT_ID>
+#                 + the IAM setup in README ("API -> Cloud Run"), otherwise Cloud Build
+#                 fails with 403 and the service is not publicly reachable
 # Usage:          bash scripts/deploy_cloud_run.sh
 # Override any variable inline, e.g.  REGION=us-east1 bash scripts/deploy_cloud_run.sh
 set -euo pipefail
+
+# Never wait on hidden interactive prompts (some gcloud output below is silenced)
+export CLOUDSDK_CORE_DISABLE_PROMPTS=1
 
 PROJECT_ID="${PROJECT_ID:-$(gcloud config get-value project 2>/dev/null)}"
 REGION="${REGION:-us-central1}"
