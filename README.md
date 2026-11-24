@@ -114,6 +114,31 @@ HF food.parquet ──ingest.py──▶ GCS (food_clean.parquet)
   Streamlit (Community Cloud) ──POST /predict──▶ FastAPI (Cloud Run)
 ```
 
+## Project structure
+
+```text
+snack-check/
+├── config.yaml                 # Dataset, split, model, and MLflow settings
+├── Dockerfile                 # Image for ingestion, training, and API serving
+├── docker-entrypoint.sh       # Selects ingest, train, or serve
+├── requirements.txt           # Pipeline and API dependencies
+├── src/
+│   ├── ingest.py              # Clean Open Food Facts data and upload it to GCS
+│   ├── download_data.py       # Download the cleaned data from GCS
+│   ├── preprocess.py          # Split data and build the sklearn pipeline
+│   ├── train.py               # Train, evaluate, log to MLflow, and upload the model
+│   └── api/main.py            # FastAPI health and prediction endpoints
+├── frontend/
+│   ├── app.py                 # Streamlit interface that calls the API
+│   └── requirements.txt       # Front-end dependencies
+├── scripts/
+│   ├── deploy_cloud_run.sh    # Build and deploy the API on Cloud Run
+│   └── make_dummy_model.py    # Placeholder model for local API testing
+├── tests/test_api.py          # API contract and validation tests
+├── docs/                      # MLflow runs and artifacts screenshots
+└── models/                    # Local model output (model.joblib is git-ignored)
+```
+
 ## Cloud services used
 
 | Service | Used for |
@@ -162,7 +187,7 @@ pytest -q                                       # API tests
 
 ### With Docker
 
-One image, two entry points (`serve` is the default):
+One image runs ingestion, training, and serving (`serve` is the default):
 
 ```bash
 docker build -t snack-check .
@@ -176,6 +201,13 @@ docker run --rm \
   -v ~/.config/gcloud:/home/appuser/.config/gcloud:ro \
   -e GOOGLE_CLOUD_PROJECT=<PROJECT_ID> \
   snack-check train --no-upload
+
+# Ingest (also needs a Hugging Face token; remove --no-upload to write to GCS)
+docker run --rm \
+  -v ~/.config/gcloud:/home/appuser/.config/gcloud:ro \
+  -e GOOGLE_CLOUD_PROJECT=<PROJECT_ID> \
+  -e HF_TOKEN="$HF_TOKEN" \
+  snack-check ingest --limit 20000 --no-upload
 ```
 
 If `models/` is empty at build time, set `-e MODEL_GCS_URI=gs://snack-check-data-lexie/models/model.joblib`
