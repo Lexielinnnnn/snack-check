@@ -1,10 +1,12 @@
-# snack-check: one image, two entry points
+# snack-check: one image for ingestion, training, and serving
 #   serve (default): FastAPI on $PORT (Cloud Run sets PORT=8080)
 #   train          : runs src/train.py (needs GCS credentials, see README)
+#   ingest         : runs src/ingest.py (needs Hugging Face and GCS credentials)
 #
 #   docker build -t snack-check .
 #   docker run -p 8080:8080 snack-check                 # serve
 #   docker run snack-check train --no-upload            # train (extra args go to train.py)
+#   docker run snack-check ingest --no-upload           # ingest (extra args go to ingest.py)
 
 FROM python:3.11-slim
 
