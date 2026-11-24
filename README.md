@@ -6,8 +6,91 @@ A full-stack ML system that predicts whether a packaged food is **ultra-processe
 the nine numbers on its nutrition label. Data from Open Food Facts → cleaned and stored in Google Cloud
 Storage → sklearn pipeline tracked with MLflow → FastAPI on Cloud Run → Streamlit app on Hugging Face Spaces.
 
-<!-- ===== Sections owned by A: overview & goals, dataset (Open Food Facts, ODbL), model & evaluation,
-     how to train, ethics & limitations ===== -->
+## Project overview and goals
+
+You often hear that "ultra-processed" food is bad for you, but a package doesn't tell you whether it is.
+The NOVA system, which sorts foods into four processing levels, depends on the ingredients and how the food
+was made. Shoppers rarely read that closely, but every package has a nutrition label. We wanted to see how
+far the label numbers plus the additive count can get you in predicting whether a product is NOVA 4
+(ultra-processed).
+
+The course's focus was the engineering side, so most of our effort went into making the pipeline
+reproducible: the data is pulled from cloud storage, every parameter lives in `config.yaml`, runs are
+tracked in MLflow, and the model is served as a containerized API with a small public front end.
+
+## Dataset
+
+We use [Open Food Facts](https://world.openfoodfacts.org/), a crowdsourced, non-profit food product
+database, via the Hugging Face dataset
+[`openfoodfacts/product-database`](https://huggingface.co/datasets/openfoodfacts/product-database)
+(`food.parquet`, about 7.7 GB). The data is licensed under the ODbL (see [Data attribution](#data-attribution)).
+
+`src/ingest.py` turns the raw file into a clean training set:
+
+1. Download `food.parquet` once and cache it locally. We originally read it straight from Hugging Face
+   with DuckDB, but the many small anonymous requests got us rate-limited (HTTP 429). Now we download once,
+   logged in with an HF token, and read the local copy.
+2. Keep products that have a NOVA group (1–4) and an additive count.
+3. Flatten the nested `nutriments` field into one column per nutrient, using per-100 g values only. Some
+   products only have per-serving values; we drop those rather than guess the serving size. When kcal or
+   salt is missing, we compute it from kJ or sodium.
+4. Remove impossible rows, such as nutrients above 100 g per 100 g, more saturated fat than total fat, or
+   more sugar than carbohydrates.
+5. Take a random sample of 100,000 products (seed 42) and upload it to
+   `gs://snack-check-data-lexie/data/food_clean.parquet`.
+
+Training always starts by downloading that file from GCS (`src/download_data.py`).
+
+The nine features are the per-100 g values of `energy_kcal`, `fat`, `saturated_fat`, `carbohydrates`,
+`sugars`, `fiber`, `proteins` and `salt`, plus `additives_n` (number of additives). `fiber` is missing for
+about 19% of products, so the model imputes it. The target `ultra_processed` is 1 for NOVA 4 and 0
+otherwise; 66% of the cleaned sample is ultra-processed.
+
+## Model and evaluation
+
+The model is one scikit-learn pipeline: median imputation → standard scaling → random forest (200 trees,
+`max_depth=12`, `min_samples_leaf=5`, balanced class weights). Because preprocessing is inside the
+pipeline, the API can pass raw inputs straight to `predict`. The data is split 70/15/15 into
+train/validation/test, stratified by the target. We report F1 and AUROC since the classes are imbalanced.
+
+We tried logistic regression as a baseline:
+
+| Model | Split | F1 | AUROC | Accuracy | Precision | Recall |
+|---|---|---|---|---|---|---|
+| Logistic regression | validation | 0.844 | 0.903 | 0.812 | 0.939 | 0.766 |
+| Logistic regression | test | 0.849 | 0.904 | 0.818 | 0.938 | 0.776 |
+| Random forest | validation | 0.899 | 0.945 | 0.871 | 0.938 | 0.863 |
+| Random forest | test | 0.899 | 0.947 | 0.872 | 0.936 | 0.865 |
+
+The random forest is better on almost every metric, and its validation and test scores are nearly the
+same, so we deployed it. On the 15,000 test products it got 13,075 right. It missed 1,343 ultra-processed
+products and wrongly flagged 582 others. That imbalance makes sense: some ultra-processed foods have
+ordinary nutrition numbers, and the clues are in the ingredient list, which the model never sees.
+
+Each MLflow run logs the parameters, metrics, a confusion matrix, a feature-importance plot and the model.
+One snag: newer MLflow versions run a safety check when saving sklearn models and rejected our random
+forest's internal types, so `train.py` explicitly lists the two types we trust.
+
+## How to train the model
+
+All settings are in `config.yaml`. To run the pipeline locally:
+
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+hf auth login                              # free Hugging Face token, needed for the download
+gcloud auth application-default login      # lets Python access the GCS bucket
+
+python src/ingest.py                       # optional: rebuild the cleaned data and upload it to GCS
+python src/train.py --no-upload --model-type logistic_regression   # baseline
+python src/train.py                        # random forest; uploads models/model.joblib to GCS
+
+mlflow ui --backend-store-uri sqlite:///mlflow.db                  # view runs at http://127.0.0.1:5000
+```
+
+`ingest.py --limit 20000 --no-upload` runs a quick test on a subset. The uploaded model at
+`gs://snack-check-data-lexie/models/model.joblib` is the one the deploy script packages into the API. To
+train inside Docker instead, see [With Docker](#with-docker).
 
 ## Architecture
 
@@ -153,3 +236,31 @@ as the API before sending.
 have to count additives (E-numbers) themselves, which is error-prone; the first request after idle can take
 ~10 s while Cloud Run starts a container; and a single probability can read as more certain than the model
 is, so the app labels it as model confidence and states that it isn't nutrition advice.
+
+## Ethics and limitations
+
+The model predicts a label; it doesn't measure how processed a food is. NOVA is based on ingredients and
+manufacturing, and we only give the model nutrition numbers and an additive count. It picks up on patterns
+that go along with ultra-processing, like more additives, sugar and salt, and it misses products whose
+processing only shows in the ingredient list. The result also isn't health advice. Butter and sugar are
+not NOVA 4, and NOVA itself is debated among nutrition researchers. We don't think the model should be
+used for product labeling or marketing claims.
+
+The data has its own problems. Open Food Facts is filled in by volunteers, so some values are wrong in ways
+our cleaning can't catch, and the NOVA groups are computed automatically from the entered ingredients. Most
+products come from Europe (especially France) and North America, so the model is probably less reliable
+for food from other regions. We also only kept products with complete per-100 g data, which may not
+represent what's actually on shelves. And since two-thirds of our sample is ultra-processed, the model's
+probabilities reflect that mix rather than a typical shopping cart.
+
+On the user side, people have to count additives themselves, which is easy to get wrong and affects the
+prediction a lot. The front end presents the probability as model confidence and notes that it isn't
+nutrition advice. No personal data is collected. Using the ingredient text, or letting users scan a barcode
+instead of typing numbers, would probably help the most.
+
+## Data attribution
+
+Product data © [Open Food Facts](https://world.openfoodfacts.org/) contributors, available under the
+[Open Database License](https://opendatacommons.org/licenses/odbl/1-0/); individual contents under the
+[Database Contents License](https://opendatacommons.org/licenses/dbcl/1-0/). The cleaned sample in our
+bucket is a derivative of this database.
