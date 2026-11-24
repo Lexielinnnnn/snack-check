@@ -69,7 +69,12 @@ same, so we deployed it. On the 15,000 test products it got 13,075 right. It mis
 products and wrongly flagged 582 others. That imbalance makes sense: some ultra-processed foods have
 ordinary nutrition numbers, and the clues are in the ingredient list, which the model never sees.
 
+![MLflow runs comparison showing logistic regression and two random forest runs](docs/mlflow-runs-comparison.png)
+
 Each MLflow run logs the parameters, metrics, a confusion matrix, a feature-importance plot and the model.
+
+![MLflow artifacts showing the confusion matrix and feature importance artifact](docs/mlflow-artifacts.jpg)
+
 One snag: newer MLflow versions run a safety check when saving sklearn models and rejected our random
 forest's internal types, so `train.py` explicitly lists the two types we trust.
 
